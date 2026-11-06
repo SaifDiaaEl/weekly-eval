@@ -42,7 +42,7 @@
           <div class="logo-big">ت</div>
           <h2>نظام التقييم والمتابعة</h2>
           <p>سجّل دخولك للمتابعة</p>
-          ${window.IS_DEMO ? '<div class="demo-banner">⚠️ وضع تجريبي (localStorage). أدخل إعدادات Supabase في assets/js/config.js لاستخدام قاعدة بيانات حقيقية.</div>' : ''}
+          ${window.IS_DEMO ? '<div class="demo-banner">⚠️ وضع تجريبي — البيانات محفوظة على هذا الجهاز فقط.</div>' : ''}
           <div class="login-tabs">
             <button class="active" data-tab="login">تسجيل الدخول</button>
             <button data-tab="register">إنشاء حساب</button>
@@ -50,20 +50,18 @@
           <div id="loginForm">
             <div class="form-group">
               <label>اسم المستخدم</label>
-              <input class="form-control" id="lu" placeholder="father / brother / doctor / me" />
+              <input class="form-control" id="lu" placeholder="اسم المستخدم" />
             </div>
             <div class="form-group">
               <label>كلمة المرور</label>
               <input class="form-control" id="lp" type="password" />
             </div>
             <button class="btn btn-primary btn-block" id="btnLogin">دخول</button>
-            <p style="margin-top:12px;font-size:12px;color:var(--muted);text-align:center;">
-              ${window.IS_DEMO ? 'تجريبي: father/father123, brother/brother123, doctor/doctor123, me/me123' : 'أنشئ حسابك أولاً عبر "إنشاء حساب" (مرة واحدة).'}
-            </p>
+            ${window.IS_DEMO ? '' : '<p style="margin-top:12px;font-size:12px;color:var(--muted);text-align:center;">أنشئ حسابك أولاً عبر "إنشاء حساب" (مرة واحدة).</p>'}
           </div>
           <div id="registerForm" style="display:none;">
             <div class="form-group">
-              <label>اسم المستخدم (3-20 حرف، أحرف/أرقام/_)</label>
+              <label>اسم المستخدم (2-20 حرف، أحرف/أرقام/_)</label>
               <input class="form-control" id="ru" />
             </div>
             <div class="form-group">
@@ -78,8 +76,8 @@
               </select>
             </div>
             <div class="form-group" id="codeGroup">
-              <label>رمز المشاهد (0088)</label>
-              <input class="form-control" id="rc" type="password" placeholder="0088" />
+              <label>رمز المشاهد</label>
+              <input class="form-control" id="rc" type="password" placeholder="أدخل الرمز" />
             </div>
             <button class="btn btn-accent btn-block" id="btnRegister">إنشاء حساب</button>
           </div>
@@ -488,26 +486,29 @@
       return;
     }
     const today = WeekUtils.todayISO();
-    // check existing today
-    const existing = await Store.listEvaluations({ userId: currentUser.id });
-    const todayEval = existing.find(e => e.eval_date === today);
-    if (todayEval) { editingEvalId = todayEval.id; selectedScore = todayEval.score; }
+    // support editing a specific evaluation passed via window._editingEval
+    let editingEval = null;
+    if (window._editingEval) {
+      editingEval = window._editingEval;
+      window._editingEval = null;
+    }
+    if (editingEval) { editingEvalId = editingEval.id; selectedScore = editingEval.score; }
     else { editingEvalId = null; selectedScore = null; }
 
     container.innerHTML = `
       <div class="card" style="max-width:720px;">
-        <h3 style="margin-bottom:16px;">${editingEvalId ? "تعديل تقييم اليوم" : "تقييم اليوم"} — ${today}</h3>
+        <h3 style="margin-bottom:16px;">${editingEvalId ? "تعديل تقييم" : "تقييم اليوم"} — ${today}</h3>
         <div class="form-group">
           <label>✅ الإيجابيات (التصرفات الجيدة)</label>
-          <textarea class="form-control" id="pos" placeholder="اكتب جميع الأشياء الجيدة...">${editingEvalId ? esc(todayEval.positives) : ""}</textarea>
+          <textarea class="form-control" id="pos" placeholder="اكتب جميع الأشياء الجيدة...">${editingEval ? esc(editingEval.positives) : ""}</textarea>
         </div>
         <div class="form-group">
           <label>⚠️ السلبيات (ما يحتاج تحسين)</label>
-          <textarea class="form-control" id="neg" placeholder="اكتب التصرفات التي تحتاج تحسين...">${editingEvalId ? esc(todayEval.negatives) : ""}</textarea>
+          <textarea class="form-control" id="neg" placeholder="اكتب التصرفات التي تحتاج تحسين...">${editingEval ? esc(editingEval.negatives) : ""}</textarea>
         </div>
         <div class="form-group">
           <label>🏷️ وسوم (Tags) — مفصولة بفواصل</label>
-          <input class="form-control" id="tags" placeholder="دراسة, صحة, اجتماعي..." value="${editingEvalId ? esc((todayEval.tags||[]).join(', ')) : ''}" />
+          <input class="form-control" id="tags" placeholder="دراسة, صحة, اجتماعي..." value="${editingEval ? esc((editingEval.tags||[]).join(', ')) : ''}" />
         </div>
         <div class="form-group">
           <label>⭐ تقييم اليوم (من 10)</label>
@@ -532,17 +533,25 @@
       const pos = document.getElementById("pos").value.trim();
       const neg = document.getElementById("neg").value.trim();
       if (selectedScore === null) { toast("اختر درجة من 10"); return; }
+      const payload = {
+        user_id: currentUser.id,
+        evaluator_key: currentUser.evaluatorKey,
+        eval_date: today,
+        positives: pos,
+        negatives: neg,
+        score: selectedScore,
+        tags: (document.getElementById("tags").value || "").split(",").map(t=>t.trim()).filter(Boolean)
+      };
       try {
-        await Store.upsertEvaluation({
-          user_id: currentUser.id,
-          evaluator_key: currentUser.evaluatorKey,
-          eval_date: today,
-          positives: pos,
-          negatives: neg,
-          score: selectedScore,
-          tags: (document.getElementById("tags").value || "").split(",").map(t=>t.trim()).filter(Boolean)
-        });
-        toast("تم حفظ التقييم");
+        if (editingEvalId) {
+          await Store.updateEvaluation(editingEvalId, payload);
+          toast("تم تحديث التقييم");
+        } else {
+          await Store.upsertEvaluation(payload);
+          toast("تم حفظ التقييم");
+        }
+        editingEvalId = null;
+        selectedScore = null;
         navigate("dashboard");
       } catch (e) { toast(e.message || "فشل الحفظ"); }
     });
@@ -963,7 +972,6 @@
     container.innerHTML = `<div class="empty"><div class="icon">⏳</div>جاري التحميل...</div>`;
     try {
       const allEvals = await Store.listEvaluations({});
-      const profiles = await Store.listProfiles();
       const weekMap = {};
       for (const e of allEvals) {
         const w = WeekUtils.weekStart(e.eval_date);
@@ -1233,7 +1241,7 @@
         const neg = document.getElementById("neg").value.trim();
         if (selectedScore === null) { toast("اختر درجة من 10"); return; }
         try {
-          await Store.upsertEvaluation({
+          await Store.updateEvaluation(ev.id, {
             user_id: currentUser.id,
             evaluator_key: currentUser.evaluatorKey,
             eval_date: ev.eval_date,

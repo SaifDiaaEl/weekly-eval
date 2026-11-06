@@ -90,6 +90,7 @@ input, textarea, select { font-family: inherit; }
   width: 36px; height: 36px; border-radius: 50%;
   background: var(--primary); color: #fff;
   display: flex; align-items: center; justify-content: center; font-weight: 700;
+  font-size: 20px;
 }
 .user-chip .info { flex: 1; min-width: 0; }
 .user-chip .info .name { color: #fff; font-weight: 600; font-size: 14px; }

@@ -42,7 +42,7 @@
     _session: null,
     init() {
       if (!localStorage.getItem("demo_users")) {
-        localStorage.setItem("demo_users", JSON.stringify(cfg.DEMO_USERS.map(u => ({
+        localStorage.setItem("demo_users", JSON.stringify((cfg.DEMO_USERS || []).map(u => ({
           id: uid(), username: u.username, password: u.password,
           displayName: u.displayName, role: u.role, evaluatorKey: u.evaluatorKey,
           avatar: u.avatar || "👤", bio: "", settings: {}
@@ -96,15 +96,19 @@
     },
     async upsertEvaluation(data) {
       const evals = JSON.parse(localStorage.getItem("demo_evals") || "[]");
-      const idx = evals.findIndex(e => e.user_id === data.user_id && e.eval_date === data.eval_date);
       const now = new Date().toISOString();
-      if (idx >= 0) {
-        evals[idx] = { ...evals[idx], ...data, updated_at: now };
-      } else {
-        evals.push({ id: uid(), ...data, created_at: now, updated_at: now });
-      }
+      const rec = { id: uid(), ...data, created_at: now, updated_at: now };
+      evals.push(rec);
       localStorage.setItem("demo_evals", JSON.stringify(evals));
-      return evals[idx >= 0 ? idx : evals.length - 1];
+      return rec;
+    },
+    async updateEvaluation(id, data) {
+      const evals = JSON.parse(localStorage.getItem("demo_evals") || "[]");
+      const idx = evals.findIndex(e => e.id === id);
+      if (idx < 0) throw new Error("Evaluation not found");
+      evals[idx] = { ...evals[idx], ...data, updated_at: new Date().toISOString() };
+      localStorage.setItem("demo_evals", JSON.stringify(evals));
+      return evals[idx];
     },
     async deleteEvaluation(id) {
       const evals = JSON.parse(localStorage.getItem("demo_evals") || "[]");
@@ -116,6 +120,14 @@
   // SUPABASE MODE
   // ============================================================
   let sb = null;
+  function mapProfile(d) {
+    return {
+      id: d.id, username: d.username, displayName: d.display_name,
+      role: d.role, evaluatorKey: d.evaluator_key,
+      bio: d.bio || "", avatar: d.avatar || "👤",
+      settings: d.settings || {}
+    };
+  }
   const SupaStore = {
     async init() {
       if (!window.supabase) {
@@ -130,7 +142,7 @@
       sb = window.supabase.createClient(cfg.SUPABASE_URL, cfg.SUPABASE_ANON_KEY);
     },
     async signIn(username, password) {
-      const email = username.toLowerCase() + "@weekly-eval.local";
+      const email = username.toLowerCase() + "@example.com";
       const { data, error } = await sb.auth.signInWithPassword({ email, password });
       if (error) throw new Error("اسم المستخدم أو كلمة المرور غير صحيحة");
       return data;
@@ -143,14 +155,9 @@
     async getProfile() {
       const session = await this.getSession();
       if (!session) return null;
-      const { data, error } = await sb.from("profiles").select("*").eq("id", session.user.id).single();
-      if (error) return null;
-      return {
-        id: data.id, username: data.username, displayName: data.display_name,
-        role: data.role, evaluatorKey: data.evaluator_key,
-        bio: data.bio || "", avatar: data.avatar || "👤",
-        settings: data.settings || {}
-      };
+      const { data, error } = await sb.from("profiles").select("*").eq("id", session.user.id).maybeSingle();
+      if (error || !data) return null;
+      return mapProfile(data);
     },
     async listProfiles() {
       const { data, error } = await sb.from("profiles").select("*");
@@ -190,26 +197,23 @@
         score: Number(data.score), created_at: data.created_at, updated_at: data.updated_at };
     },
     async upsertEvaluation(data) {
-      // check existing
-      const { data: existing } = await sb.from("evaluations").select("id").eq("user_id", data.user_id).eq("eval_date", data.eval_date).maybeSingle();
-      if (existing) {
-        const { data: upd, error } = await sb.from("evaluations").update({
-          positives: data.positives, negatives: data.negatives, score: data.score, evaluator_key: data.evaluator_key,
-          tags: data.tags || []
-        }).eq("id", existing.id).select().single();
-        if (error) throw error;
-        return { id: upd.id, user_id: upd.user_id, evaluator_key: upd.evaluator_key, eval_date: upd.eval_date,
-          positives: upd.positives, negatives: upd.negatives, score: Number(upd.score), updated_at: upd.updated_at };
-      } else {
-        const { data: ins, error } = await sb.from("evaluations").insert({
-          user_id: data.user_id, evaluator_key: data.evaluator_key, eval_date: data.eval_date,
-          positives: data.positives, negatives: data.negatives, score: data.score,
-          tags: data.tags || []
-        }).select().single();
-        if (error) throw error;
-        return { id: ins.id, user_id: ins.user_id, evaluator_key: ins.evaluator_key, eval_date: ins.eval_date,
-          positives: ins.positives, negatives: ins.negatives, score: Number(ins.score), created_at: ins.created_at };
-      }
+      const { data: ins, error } = await sb.from("evaluations").insert({
+        user_id: data.user_id, evaluator_key: data.evaluator_key, eval_date: data.eval_date,
+        positives: data.positives, negatives: data.negatives, score: data.score,
+        tags: data.tags || []
+      }).select().single();
+      if (error) throw error;
+      return { id: ins.id, user_id: ins.user_id, evaluator_key: ins.evaluator_key, eval_date: ins.eval_date,
+        positives: ins.positives, negatives: ins.negatives, score: Number(ins.score), created_at: ins.created_at };
+    },
+    async updateEvaluation(id, data) {
+      const { data: upd, error } = await sb.from("evaluations").update({
+        positives: data.positives, negatives: data.negatives, score: data.score, evaluator_key: data.evaluator_key,
+        tags: data.tags || [], eval_date: data.eval_date
+      }).eq("id", id).select().single();
+      if (error) throw error;
+      return { id: upd.id, user_id: upd.user_id, evaluator_key: upd.evaluator_key, eval_date: upd.eval_date,
+        positives: upd.positives, negatives: upd.negatives, score: Number(upd.score), updated_at: upd.updated_at };
     }
   };
 
@@ -226,17 +230,30 @@
 
   async function signUp(username, password, role, code) {
     const u = username.toLowerCase().trim();
-    if (!/^[a-z0-9_]{3,20}$/.test(u)) throw new Error("اسم المستخدم: 3-20 حرفًا، أحرف/أرقام/underscore فقط");
+    if (!/^[a-z0-9_]{2,20}$/.test(u)) throw new Error("اسم المستخدم: 2-20 حرفًا، أحرف/أرقام/underscore فقط");
     if (!password || password.length < 6) throw new Error("كلمة المرور يجب أن تكون 6 أحرف على الأقل");
     const special = SPECIAL_EVALUATORS[u];
-    let chosenRole = role === "evaluator" ? "evaluator" : "viewer";
-    if (chosenRole === "viewer") {
-      if (code !== "0088") throw new Error("رمز المشاهد غير صحيح (0088)");
-    }
+    const chosenRole = role === "evaluator" ? "evaluator" : "viewer";
     const displayName = special ? special.displayName : username.trim();
     const finalRole = special ? special.role : chosenRole;
     const evaluatorKey = special ? special.evaluatorKey : (finalRole === "evaluator" ? u : null);
     const avatar = special ? special.avatar : (finalRole === "evaluator" ? "👨‍💼" : "👤");
+
+    // فقط الهويات الثلاث المعتمدة يمكنها التسجيل كمُقيّم.
+    if (finalRole === "evaluator" && !["father", "brother", "doctor"].includes(evaluatorKey)) {
+      throw new Error("اسم المستخدم للمُقيّم يجب أن يكون father أو brother أو doctor");
+    }
+
+    // رمز المشاهد يُتحقق منه على السيرفر (غير مخزّن في كود المتصفح).
+    if (finalRole === "viewer") {
+      if (window.IS_DEMO) {
+        if (!code || code.length < 4) throw new Error("رمز المشاهد غير صحيح");
+      } else {
+        const { data: ok, error } = await sb.rpc("check_viewer_code", { p_code: code || "" });
+        if (error || !ok) throw new Error("رمز المشاهد غير صحيح");
+      }
+    }
+
     if (window.IS_DEMO) {
       const users = JSON.parse(localStorage.getItem("demo_users"));
       if (users.find(x => x.username === u)) throw new Error("هذا الحساب موجود مسبقًا، سجّل الدخول");
@@ -246,15 +263,27 @@
       localStorage.setItem("demo_users", JSON.stringify(users));
       return { user: { id: nu.id } };
     } else {
-      const email = u + "@weekly-eval.local";
-      const { data, error } = await sb.auth.signUp({ email, password });
+      const email = u + "@example.com";
+      const { data, error } = await sb.auth.signUp({
+        email,
+        password,
+        options: {
+          data: {
+            username: u,
+            display_name: displayName,
+            role: finalRole,
+            evaluator_key: evaluatorKey,
+            avatar,
+            viewer_code: code || ""
+          }
+        }
+      });
       if (error) throw new Error(error.message);
-      if (data.user) {
-        const { error: perr } = await sb.from("profiles").insert({
-          id: data.user.id, username: u, display_name: displayName,
-          role: finalRole, evaluator_key: evaluatorKey, avatar, bio: "", settings: {}
-        });
-        if (perr) throw new Error(perr.message);
+      if (data.user && Array.isArray(data.user.identities) && data.user.identities.length === 0) {
+        throw new Error("هذا الحساب موجود مسبقًا، سجّل الدخول");
+      }
+      if (!data.session) {
+        throw new Error("تم إنشاء الحساب، لكن يلزم تأكيد البريد الإلكتروني قبل الدخول.");
       }
       return data;
     }
@@ -451,7 +480,7 @@
       localStorage.setItem("demo_users", JSON.stringify(users));
       return true;
     } else {
-      const email = profile.username + "@weekly-eval.local";
+      const email = profile.username + "@example.com";
       const { error: signInErr } = await sb.auth.signInWithPassword({ email, password: oldPw });
       if (signInErr) throw new Error("كلمة المرور الحالية غير صحيحة");
       const { error } = await sb.auth.updateUser({ password: newPw });

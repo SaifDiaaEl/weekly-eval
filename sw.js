@@ -1,4 +1,4 @@
-const CACHE = "eval-v3";
+const CACHE = "eval-v4";
 const ASSETS = ["/", "/index.html", "/assets/css/styles.css", "/assets/js/config.js", "/assets/js/store.js", "/assets/js/app.js", "/manifest.json"];
 
 self.addEventListener("install", (e) => {
