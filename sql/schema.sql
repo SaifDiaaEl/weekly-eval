@@ -170,6 +170,10 @@ create policy "profiles_update_own" on public.profiles
   for update using (auth.uid() = id)
   with check (auth.uid() = id);
 
+drop policy if exists "profiles_delete_own" on public.profiles;
+create policy "profiles_delete_own" on public.profiles
+  for delete using (auth.uid() = id);
+
 -- 7. Evaluations (more than one evaluation per day is allowed)
 create table if not exists public.evaluations (
   id uuid primary key default gen_random_uuid(),
@@ -264,6 +268,10 @@ drop policy if exists "goals_update_own" on public.goals;
 create policy "goals_update_own" on public.goals
   for update using (auth.uid() = user_id)
   with check (auth.uid() = user_id);
+
+drop policy if exists "goals_delete_own" on public.goals;
+create policy "goals_delete_own" on public.goals
+  for delete using (auth.uid() = user_id);
 
 -- 10. Auto-update updated_at
 create or replace function public.touch_updated_at()

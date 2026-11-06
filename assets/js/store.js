@@ -25,6 +25,23 @@
     return d.toISOString().slice(0, 10);
   }
 
+  // اسم المستخدم يمكن أن يكون عربيًا أو إنجليزيًا.
+  // نطبّع الاسم (توحيد المسافات وإزالة الفروق في حالة الأحرف اللاتينية)
+  // ثم نشتق منه بريدًا وهميًا ثابتًا لأن Supabase Auth يتطلب بريدًا.
+  function normalizeUsername(raw) {
+    return (raw || "").normalize("NFKC").trim().replace(/\s+/g, " ").toLowerCase();
+  }
+  window.normalizeUsername = normalizeUsername;
+
+  async function emailForUsername(raw) {
+    const key = normalizeUsername(raw);
+    const bytes = new TextEncoder().encode(key);
+    const digest = await crypto.subtle.digest("SHA-256", bytes);
+    const hex = Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, "0")).join("");
+    return "u" + hex.slice(0, 40) + "@example.com";
+  }
+  window.emailForUsername = emailForUsername;
+
   window.WeekUtils = { weekStart, addDays, todayISO };
 
   const EVALUATORS = [
@@ -53,7 +70,8 @@
     },
     async signIn(username, password) {
       const users = JSON.parse(localStorage.getItem("demo_users"));
-      const u = users.find(x => x.username === username && x.password === password);
+      const key = normalizeUsername(username);
+      const u = users.find(x => normalizeUsername(x.username) === key && x.password === password);
       if (!u) throw new Error("اسم المستخدم أو كلمة المرور غير صحيحة");
       this._session = { user: { id: u.id } };
       localStorage.setItem("demo_session", JSON.stringify(this._session));
@@ -79,7 +97,18 @@
       return u;
     },
     async listProfiles() {
-      return JSON.parse(localStorage.getItem("demo_users"));
+      return JSON.parse(localStorage.getItem("demo_users")).map(u => ({
+        id: u.id, username: u.username, displayName: u.displayName || u.username,
+        role: u.role, evaluatorKey: u.evaluatorKey, bio: u.bio || "",
+        avatar: u.avatar || "👤", settings: u.settings || {}, createdAt: u.createdAt || ""
+      }));
+    },
+    async deleteAccount(userId) {
+      const users = JSON.parse(localStorage.getItem("demo_users") || "[]");
+      localStorage.setItem("demo_users", JSON.stringify(users.filter(u => u.id !== userId)));
+      const evals = JSON.parse(localStorage.getItem("demo_evals") || "[]");
+      localStorage.setItem("demo_evals", JSON.stringify(evals.filter(e => e.user_id !== userId)));
+      return true;
     },
     async listEvaluations(filters) {
       let evals = JSON.parse(localStorage.getItem("demo_evals") || "[]");
@@ -125,7 +154,7 @@
       id: d.id, username: d.username, displayName: d.display_name,
       role: d.role, evaluatorKey: d.evaluator_key,
       bio: d.bio || "", avatar: d.avatar || "👤",
-      settings: d.settings || {}
+      settings: d.settings || {}, createdAt: d.created_at || ""
     };
   }
   const SupaStore = {
@@ -214,6 +243,14 @@
       if (error) throw error;
       return { id: upd.id, user_id: upd.user_id, evaluator_key: upd.evaluator_key, eval_date: upd.eval_date,
         positives: upd.positives, negatives: upd.negatives, score: Number(upd.score), updated_at: upd.updated_at };
+    },
+    async deleteAccount(userId) {
+      // مسح بيانات التطبيق المرتبطة بالمستخدم (RLS تضمن ألا يمسح إلا بياناته الخاصة)
+      await sb.from("comments").delete().eq("user_id", userId);
+      await sb.from("evaluations").delete().eq("user_id", userId);
+      await sb.from("goals").delete().eq("user_id", userId);
+      await sb.from("profiles").delete().eq("id", userId);
+      return true;
     }
   };
 
@@ -236,13 +273,9 @@
     const chosenRole = role === "evaluator" ? "evaluator" : "viewer";
     const displayName = special ? special.displayName : username.trim();
     const finalRole = special ? special.role : chosenRole;
+    // أي اسم مستخدم مسموح (عربي/إنجليزي)، والمُقيّم يُسجّل باسمه ذاته كمُقيّم.
     const evaluatorKey = special ? special.evaluatorKey : (finalRole === "evaluator" ? u : null);
     const avatar = special ? special.avatar : (finalRole === "evaluator" ? "👨‍💼" : "👤");
-
-    // فقط الهويات الثلاث المعتمدة يمكنها التسجيل كمُقيّم.
-    if (finalRole === "evaluator" && !["father", "brother", "doctor"].includes(evaluatorKey)) {
-      throw new Error("اسم المستخدم للمُقيّم يجب أن يكون father أو brother أو doctor");
-    }
 
     // رمز المشاهد يُتحقق منه على السيرفر (غير مخزّن في كود المتصفح).
     if (finalRole === "viewer") {

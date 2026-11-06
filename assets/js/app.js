@@ -746,6 +746,12 @@
             <button class="btn btn-accent" id="btnChangePw">تغيير</button>
             <span id="pwMsg" style="margin-right:10px;"></span>
           </div>
+          <div class="card" style="border:1px solid var(--danger);">
+            <h3 style="margin-bottom:8px;color:var(--danger);">حذف الحساب نهائياً</h3>
+            <p style="color:var(--muted);font-size:13px;margin-bottom:10px;">سيتم مسح ملفك الشخصي وتقييماتك وتعليقاتك وأهدافك بشكل نهائي، وسيتم تسجيل خروجك.</p>
+            <button class="btn btn-danger" id="btnDeleteAccount">حذف حسابي</button>
+            <span id="delMsg" style="margin-right:10px;color:var(--danger);"></span>
+          </div>
         </div>
 
       `;
@@ -788,6 +794,17 @@
           msg.textContent = "✅ تم تغيير كلمة المرور";
           msg.style.color = "var(--accent)";
         } catch (e) { msg.textContent = "❌ " + e.message; msg.style.color = "var(--danger)"; }
+      });
+
+      document.getElementById("btnDeleteAccount").addEventListener("click", async () => {
+        if (!confirm("تأكيد حذف الحساب نهائياً؟ لا يمكن الاسترجاع.")) return;
+        try {
+          await Store.deleteAccount(currentUser.id);
+          await Store.signOut();
+          currentUser = null;
+          renderLogin();
+          toast("تم حذف الحساب");
+        } catch (e) { document.getElementById("delMsg").textContent = "❌ " + e.message; }
       });
     } catch (e) {
       container.innerHTML = `<div class="card">خطأ: ${esc(e.message)}</div>`;
