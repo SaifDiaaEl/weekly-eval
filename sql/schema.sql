@@ -9,7 +9,7 @@ create table if not exists public.profiles (
   username text unique not null,
   display_name text not null,
   role text not null check (role in ('evaluator','viewer')),
-  evaluator_key text check (evaluator_key in ('father','brother','doctor')),
+  evaluator_key text, -- أي قيمة مسموح (لا تقتصر على الأب/الأخ/الدكتورة)
   bio text default '',
   avatar text default '👤',
   settings jsonb default '{}'::jsonb,
